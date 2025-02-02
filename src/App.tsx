@@ -134,7 +134,7 @@ You only can communicate to the user through the GUI.
               e.preventDefault();
               send(prompt);
             }}
-            className="w-full p-4 flex items-stretch gap-2 border-t border-gray-300"
+            className="w-full p-2 flex items-stretch gap-2 border-t border-gray-300"
           >
             <textarea
               className="p-2 border border-gray-300 rounded w-full resize-none"
@@ -147,10 +147,10 @@ You only can communicate to the user through the GUI.
             />
             <button
               type="submit"
-              className="p-2 bg-blue-500 text-white rounded cursor-pointer"
+              className="p-2 bg-blue-500 text-white rounded cursor-pointer disabled:opacity-50"
               disabled={isLoading}
             >
-              {isLoading ? "..." : "Submit"}
+              Submit
             </button>
           </form>
         </div>
