@@ -36,7 +36,7 @@ export function LookAhead() {
     });
     setLog([...messages, res.choices[0].message]);
     const sgsts = await suggestion([...messages, res.choices[0].message]);
-    setSuggestions(sgsts?.suggestions ?? []);
+    setSuggestions(sgsts?.expects ?? []);
 
     setIsLoading(false);
   };
@@ -90,11 +90,7 @@ export function LookAhead() {
 }
 
 export const Response = z.object({
-  suggestions: z
-    .array(z.string())
-    .describe(
-      "Please provide suggestions (optional).\n"
-    ),
+  expects: z.array(z.string()),
 });
 
 async function suggestion(log: ChatCompletionMessageParam[]) {
@@ -113,14 +109,15 @@ async function suggestion(log: ChatCompletionMessageParam[]) {
       })),
       {
         role: "system",
-        content: "Next, what does the user say?\n\nYou can use placeholders so the user can replace them with any named entities, such as `I like {food}`.",
+        content:
+          "Predict what the user will say next.\n\nYou can use placeholders so the user can replace them with any named entities, such as `I like {food}`.",
       },
     ],
     response_format: zodResponseFormat(Response, "response"),
   });
   const parsed = res.choices[0].message.parsed;
   if (parsed) {
-    console.log(parsed.suggestions);
+    console.log(parsed.expects);
   }
   return parsed;
 }
