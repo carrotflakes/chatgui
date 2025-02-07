@@ -4,8 +4,9 @@ import { z, ZodType } from "zod";
 import { zodResponseFormat } from "openai/helpers/zod";
 import Gui, { domHasInteractiveElements, State as GuiState } from "./Gui";
 import { ChatCompletionMessageParam } from "openai/resources/chat/completions";
+import ChatLogs from "./ChatLogs";
 
-const Dom: ZodType = z.lazy(() =>
+export const Dom: ZodType = z.lazy(() =>
   z.union([
     z.object({
       type: z.literal("text"),
@@ -28,7 +29,7 @@ const Dom: ZodType = z.lazy(() =>
   ])
 );
 
-const Response = z.object({
+export const Response = z.object({
   think: z
     .string()
     .describe(
@@ -96,39 +97,7 @@ You only can communicate to the user through the GUI.
     <div className="w-dvw h-dvh flex">
       {isLeftVisible && (
         <div className="w-1/2 h-full flex flex-col">
-          <div className="grow p-2 flex flex-col gap-2 overflow-auto">
-            {log.map((msg, i) => (
-              <>
-                {msg.role === "system" && (
-                  <div key={i} className="p-2 text-gray-500">
-                    {typeof msg.content === "string"
-                      ? msg.content
-                      : JSON.stringify(msg.content)}
-                  </div>
-                )}
-                {msg.role === "user" && (
-                  <div
-                    key={i}
-                    className="self-end px-2 py-1 border border-gray-300 rounded-2xl text-gray-800"
-                  >
-                    {typeof msg.content === "string"
-                      ? msg.content
-                      : JSON.stringify(msg.content)}
-                  </div>
-                )}
-                {msg.role === "assistant" && (
-                  <div
-                    key={i}
-                    className="self-start px-2 py-1 border border-gray-300 rounded-2xl text-blue-500"
-                  >
-                    {typeof msg.content === "string"
-                      ? msg.content
-                      : JSON.stringify(msg.content)}
-                  </div>
-                )}
-              </>
-            ))}
-          </div>
+          <ChatLogs log={log} assistantBlue />
           <form
             onSubmit={(e) => {
               e.preventDefault();
