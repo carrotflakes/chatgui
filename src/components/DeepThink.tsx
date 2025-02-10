@@ -13,7 +13,7 @@ Please clarify the end condition.
 Ask the task requester for details.
 They may not always reply.
 # Task Completion Notification
-Notify the task requester that the task is completed.`;
+Report the task result to the requester.`;
 
 const assistantResponseFormat = zodResponseFormat(
   z.object({
