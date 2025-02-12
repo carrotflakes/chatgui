@@ -8,6 +8,7 @@ const assistantPrompt = `You are one of the agents carrying out a task.
 You can repeat the following three types of actions.
 # Subtask Request
 Ask other agents for a subtask.
+Make your subtasks small enough relative to your main task.
 Please clarify the end condition.
 # Task Detail Inquiry
 Ask the task requester for details.
@@ -24,8 +25,8 @@ const assistantResponseFormat = zodResponseFormat(
       z.object({
         type: z.literal("subtask_request"),
         subtask: z.object({
-          detail: z.string(),
-          title: z.string(),
+          detail: z.string().describe("Please write the task in detail. Only this will be passed on to the agent."),
+          title: z.string().describe("Provide a concise title for the subtask."),
         }),
       }),
       z.object({
@@ -34,7 +35,7 @@ const assistantResponseFormat = zodResponseFormat(
       }),
       z.object({
         type: z.literal("task_completion_notification"),
-        result: z.string(),
+        result: z.string().describe("Please write the result of the task."),
       }),
     ]),
   }),
