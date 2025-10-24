@@ -1,8 +1,8 @@
 import { useCallback, useMemo, useState } from "react";
 import OpenAI from "openai";
-import { zodResponseFormat } from "openai/helpers/zod";
+import { zodTextFormat } from "openai/helpers/zod";
 import { z } from "zod";
-import { ChatCompletionMessageParam } from "openai/resources/chat/completions";
+import type { ChatMessage } from "./ChatLogs";
 
 const assistantPrompt = `You are one of the agents carrying out a task.
 You can repeat the following three types of actions.
@@ -16,44 +16,52 @@ They may not always reply.
 # Task Completion Notification
 Report the task result to the requester.`;
 
-const assistantResponseFormat = zodResponseFormat(
-  z.object({
-    thought: z
-      .string()
-      .describe("Let's think step by step to figure out your next action."),
-    action: z.union([
-      z.object({
-        type: z.literal("subtask_request"),
-        subtask: z.object({
-          detail: z.string().describe("Please write the task in detail. Only this will be passed on to the agent."),
-          title: z.string().describe("Provide a concise title for the subtask."),
-        }),
+const AssistantResponseSchema = z.object({
+  thought: z
+    .string()
+    .describe("Let's think step by step to figure out your next action."),
+  action: z.union([
+    z.object({
+      type: z.literal("subtask_request"),
+      subtask: z.object({
+        detail: z
+          .string()
+          .describe(
+            "Please write the task in detail. Only this will be passed on to the agent."
+          ),
+        title: z.string().describe("Provide a concise title for the subtask."),
       }),
-      z.object({
-        type: z.literal("task_detail_inquiry"),
-        inquiry: z.string(),
-      }),
-      z.object({
-        type: z.literal("task_completion_notification"),
-        result: z.string().describe("Please write the result of the task."),
-      }),
-    ]),
-  }),
+    }),
+    z.object({
+      type: z.literal("task_detail_inquiry"),
+      inquiry: z.string(),
+    }),
+    z.object({
+      type: z.literal("task_completion_notification"),
+      result: z.string().describe("Please write the result of the task."),
+    }),
+  ]),
+});
+
+const assistantResponseFormat = zodTextFormat(
+  AssistantResponseSchema,
   "Response"
 );
 
-const assistantResponseFormat2 = zodResponseFormat(
-  z.object({
-    thought: z.string(),
-    action: z.object({
-      type: z.literal("respond_to_inquiry"),
-      message: z.string(),
-    }),
+const AssistantResponseSchema2 = z.object({
+  thought: z.string(),
+  action: z.object({
+    type: z.literal("respond_to_inquiry"),
+    message: z.string(),
   }),
+});
+
+const assistantResponseFormat2 = zodTextFormat(
+  AssistantResponseSchema2,
   "Response2"
 );
 
-const MODEL_NAME = "gpt-4o-mini";
+const MODEL_NAME = "gpt-5-mini";
 // const MODEL_NAME = "deepseek-chat";
 
 function DeepThink() {
@@ -73,7 +81,7 @@ function DeepThink() {
       | {
           type: "user";
           content: string;
-          messages: ChatCompletionMessageParam[];
+          messages: ChatMessage[];
         }
       | {
           type: "agent";
@@ -96,42 +104,40 @@ function DeepThink() {
                 result: string;
               }
             | { type: "respond_to_inquiry"; message: string };
-          messages: ChatCompletionMessageParam[];
+          messages: ChatMessage[];
+          id: string;
         }
     )[]
   >([]);
 
   const send = useCallback(async () => {
     const latestLog = log[log.length - 1];
-    const messages: ChatCompletionMessageParam[] = !latestLog
-      ? [
-          {
-            role: "system",
-            content: assistantPrompt,
-          },
-          {
-            role: "user",
-            content: text,
-          },
-        ]
-      : [
-          ...latestLog.messages,
-          {
-            role: "user",
-            content: text,
-          },
-        ];
+    const messages: ChatMessage[] = [
+      ...latestLog.messages,
+      {
+        role: "user",
+        content: text,
+      },
+    ];
     const agentId = latestLog?.type === "agent" ? latestLog.agentId : 0;
     setLog((prev) => [...prev, { type: "user", content: text, messages }]);
-    const res = await client.beta.chat.completions.parse({
+    const res = await client.responses.parse({
       model: MODEL_NAME,
-      messages,
-      response_format: assistantResponseFormat,
+      input: toResponseInput(messages),
+      instructions: assistantPrompt,
+      text: { format: assistantResponseFormat },
     });
     console.log(res);
-    const data = res.choices[0].message.parsed;
+    const data = res.output_parsed as z.infer<
+      typeof AssistantResponseSchema
+    > | null;
     if (!data)
       throw new Error("Invalid response format: " + JSON.stringify(res));
+    const assistantMessage: ChatMessage = {
+      role: "assistant",
+      content: res.output_text ?? "",
+      id: res.id,
+    };
     setLog((prev) => [
       ...prev,
       {
@@ -139,22 +145,17 @@ function DeepThink() {
         agentId,
         content: data.thought,
         action: data.action,
-        messages: [
-          ...messages,
-          {
-            role: "assistant",
-            content: res.choices[0].message.content,
-          },
-        ],
+        messages: [...messages, assistantMessage],
+        id: res.id,
       },
     ]);
   }, [client, log, text]);
 
   const invokeSubtask = useCallback(
     async (subtask: { title: string; detail: string }) => {
-      const messages: ChatCompletionMessageParam[] = [
+      const messages: ChatMessage[] = [
         {
-          role: "system",
+          role: "developer",
           content: assistantPrompt,
         },
         {
@@ -170,16 +171,23 @@ function DeepThink() {
           messages,
         },
       ]);
-      const res = await client.beta.chat.completions.parse({
+      const res = await client.responses.parse({
         model: MODEL_NAME,
-        messages,
-        response_format: assistantResponseFormat,
+        input: toResponseInput(messages),
+        text: { format: assistantResponseFormat },
       });
       console.log(res);
-      const data = res.choices[0].message.parsed;
+      const data = res.output_parsed as z.infer<
+        typeof AssistantResponseSchema
+      > | null;
       if (!data)
         throw new Error("Invalid response format: " + JSON.stringify(res));
       const latestLog = log[log.length - 1];
+      const assistantMessage: ChatMessage = {
+        role: "assistant",
+        content: res.output_text ?? "",
+        id: res.id,
+      };
       setLog((prev) => [
         ...prev,
         {
@@ -187,13 +195,8 @@ function DeepThink() {
           agentId: latestLog?.type === "agent" ? latestLog.agentId + 1 : 0,
           content: data.thought,
           action: data.action,
-          messages: [
-            ...messages,
-            {
-              role: "assistant",
-              content: res.choices[0].message.content,
-            },
-          ],
+          messages: [...messages, assistantMessage],
+          id: res.id,
         },
       ]);
     },
@@ -210,21 +213,28 @@ function DeepThink() {
           (entry) => entry.type === "agent" && entry.agentId < agentId
         )?.messages;
       if (!clientMessages) return;
-      const messages: ChatCompletionMessageParam[] = [
+      const messages: ChatMessage[] = [
         ...clientMessages,
         {
           role: "user",
           content: "Subtask executer asked: " + inquiry,
         },
       ];
-      const res = await client.beta.chat.completions.parse({
+      const res = await client.responses.parse({
         model: MODEL_NAME,
-        messages,
+        input: toResponseInput(messages),
         response_format: assistantResponseFormat2,
       });
       console.log(res);
-      const response = res.choices[0].message.parsed;
+      const response = res.output_parsed as z.infer<
+        typeof AssistantResponseSchema2
+      > | null;
       if (!response) return;
+      const assistantMessage: ChatMessage = {
+        role: "assistant",
+        content: res.output_text ?? "",
+        id: res.id,
+      };
       setLog((prev) => [
         ...prev,
         {
@@ -235,32 +245,34 @@ function DeepThink() {
             type: "respond_to_inquiry",
             message: response.action.message,
           },
-          messages: [
-            ...messages,
-            {
-              role: "assistant",
-              content: res.choices[0].message.content,
-            },
-          ],
+          messages: [...messages, assistantMessage],
+          id: res.id,
         },
       ]);
 
-      const messages2: ChatCompletionMessageParam[] = [
+      const messages2: ChatMessage[] = [
         ...latestLog.messages,
         {
           role: "user",
           content: response.action.message,
         },
       ];
-      const res2 = await client.beta.chat.completions.parse({
+      const res2 = await client.responses.parse({
         model: MODEL_NAME,
-        messages: messages2,
-        response_format: assistantResponseFormat,
+        input: toResponseInput(messages2),
+        text: { format: assistantResponseFormat },
       });
       console.log(res2);
-      const data = res2.choices[0].message.parsed;
+      const data = res2.output_parsed as z.infer<
+        typeof AssistantResponseSchema
+      > | null;
       if (!data)
         throw new Error("Invalid response format: " + JSON.stringify(res2));
+      const assistantMessage2: ChatMessage = {
+        role: "assistant",
+        content: res2.output_text ?? "",
+        id: res2.id,
+      };
       setLog((prev) => [
         ...prev,
         {
@@ -268,13 +280,8 @@ function DeepThink() {
           agentId,
           content: data.thought,
           action: data.action,
-          messages: [
-            ...messages2,
-            {
-              role: "assistant",
-              content: res2.choices[0].message.content,
-            },
-          ],
+          messages: [...messages2, assistantMessage2],
+          id: res2.id,
         },
       ]);
     },
@@ -291,23 +298,30 @@ function DeepThink() {
           (entry) => entry.type === "agent" && entry.agentId < agentId
         )?.messages;
       if (!clientMessages) return;
-      const messages: ChatCompletionMessageParam[] = [
+      const messages: ChatMessage[] = [
         ...clientMessages,
         {
           role: "user",
           content: `Subtask completed: ${taskCompleteMessage}`,
         },
       ];
-      const res = await client.beta.chat.completions.parse({
+      const res = await client.responses.parse({
         model: MODEL_NAME,
-        messages,
-        response_format: assistantResponseFormat,
+        input: toResponseInput(messages),
+        text: { format: assistantResponseFormat },
       });
       console.log(res);
 
-      const data = res.choices[0].message.parsed;
+      const data = res.output_parsed as z.infer<
+        typeof AssistantResponseSchema
+      > | null;
       if (!data)
         throw new Error("Invalid response format: " + JSON.stringify(res));
+      const assistantMessage: ChatMessage = {
+        role: "assistant",
+        content: res.output_text ?? "",
+        id: res.id,
+      };
       setLog((prev) => [
         ...prev,
         {
@@ -315,13 +329,8 @@ function DeepThink() {
           agentId,
           content: data.thought,
           action: data.action,
-          messages: [
-            ...messages,
-            {
-              role: "assistant",
-              content: res.choices[0].message.content,
-            },
-          ],
+          messages: [...messages, assistantMessage],
+          id: res.id,
         },
       ]);
     },
@@ -428,5 +437,11 @@ function DeepThink() {
     </div>
   );
 }
+
+const toResponseInput = (messages: ChatMessage[]) =>
+  messages.map(({ role, content }) => ({
+    role,
+    content,
+  }));
 
 export default DeepThink;

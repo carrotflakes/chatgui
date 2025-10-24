@@ -1,10 +1,9 @@
 import OpenAI from "openai";
 import { useState } from "react";
 import { z, ZodType } from "zod";
-import { zodResponseFormat } from "openai/helpers/zod";
+import { zodTextFormat } from "openai/helpers/zod";
 import Gui, { domHasInteractiveElements, State as GuiState } from "./Gui";
-import { ChatCompletionMessageParam } from "openai/resources/chat/completions";
-import ChatLogs from "./ChatLogs";
+import ChatLogs, { type ChatMessage } from "./ChatLogs";
 
 export const Dom: ZodType = z.lazy(() =>
   z.union([
@@ -20,7 +19,7 @@ export const Dom: ZodType = z.lazy(() =>
     z.object({
       type: z.literal("textInput"),
       id: z.string(),
-      placeholder: z.string().optional(),
+      placeholder: z.string().nullable(),
     }),
     z.object({
       type: z.enum(["arrayV", "arrayH"]),
@@ -38,19 +37,15 @@ export const Response = z.object({
   gui: Dom.describe("The GUI to display to the user."),
 });
 
-function ChatGui() {
-  const [prompt, setPrompt] = useState("");
-  const [log, setLog] = useState<ChatCompletionMessageParam[]>([
-    {
-      role: "system",
-      content: `You are a helpful assistant.
+const INSTRUCTION = `You are a helpful assistant.
 You only can communicate to the user through the GUI.
 # GUI Example
 {"type":"arrayV","array":[{"type":"text","text":"Hello, what is your name?"},{"type":"textInput","id":"name","placeholder":""},{"type":"button","text":"Submit","id":"submit"}]}
-`,
-    },
-  ]);
-  const [, setResponse] = useState<z.infer<typeof Response>[]>([]);
+`;
+
+function ChatGui() {
+  const [prompt, setPrompt] = useState("");
+  const [log, setLog] = useState<ChatMessage[]>([]);
   const [gui, setGui] = useState<z.infer<typeof Dom>>({
     type: "text",
     text: "",
@@ -66,7 +61,7 @@ You only can communicate to the user through the GUI.
       dangerouslyAllowBrowser: true,
     });
 
-    const messages: ChatCompletionMessageParam[] = [
+    const messages: ChatMessage[] = [
       ...log,
       {
         role: "user",
@@ -74,22 +69,35 @@ You only can communicate to the user through the GUI.
       },
     ];
     setLog(messages);
-    const res = await openai.beta.chat.completions.parse({
-      model: "gpt-4o-mini",
-      messages: messages.map((msg) => ({
-        ...msg,
-        parsed: undefined,
-        tool_calls: undefined,
-      })),
-      response_format: zodResponseFormat(Response, "response"),
+    const res = await openai.responses.parse({
+      model: "gpt-5-mini",
+      input: [
+        {
+          role: "user",
+          content: text,
+        },
+      ],
+      instructions: INSTRUCTION,
+      previous_response_id: log.at(-1)?.id,
+      text: {
+        format: zodTextFormat(Response, "response"),
+      },
+      reasoning: {
+        effort: "low",
+        summary: "auto",
+      },
     });
-    const parsed = res.choices[0].message.parsed;
+    const parsed = res.output_parsed as z.infer<typeof Response> | null;
     if (parsed) {
       setGui(parsed.gui);
       setGuiState(null);
-      setResponse((prev) => [...prev, parsed]);
     }
-    setLog([...messages, res.choices[0].message]);
+    const assistantMessage: ChatMessage = {
+      role: "assistant",
+      content: res.output_text ?? "",
+      id: res.id,
+    };
+    setLog([...messages, assistantMessage]);
     setIsLoading(false);
   };
 

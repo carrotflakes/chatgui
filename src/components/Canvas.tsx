@@ -31,21 +31,18 @@ const Canvas = () => {
         apiKey: import.meta.env.VITE_OPENAI_API_KEY,
         dangerouslyAllowBrowser: true,
       });
-      const res = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are a text editing assistant. Follow the user's instructions to edit the provided text. You only need to respond with the edited text.",
-          },
+      const res = await openai.responses.create({
+        model: "gpt-5-mini",
+        instructions:
+          "You are a text editing assistant. Follow the user's instructions to edit the provided text. You only need to respond with the edited text.",
+        input: [
           {
             role: "user",
             content: `Instruction: ${instruction}\n\nText:\n${textRef.current}`,
           },
         ],
       });
-      const edited = res.choices[0].message.content ?? "";
+      const edited = res.output_text ?? "";
       setText(edited);
       setInstruction("");
     } catch (e) {
